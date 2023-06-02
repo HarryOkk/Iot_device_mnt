@@ -8,11 +8,20 @@ import json
 from remes_mysql.db_config import AliyunBizDb
 
 file_path = r"D:\my_documents\智慧电梯\花园三期.xlsx"
-logging.basicConfig(level=logging.DEBUG, handlers=[logging.FileHandler(r'D:\software\Notepad++\change.log')])
-product_key = "g4xdsqZciZ0"
+product_key = "g4xdEqa2CfX"
 iot_instance_id = "iot-060a02m5"
 cpdid_column_id = 4
 dev_status_column_id = 6
+cpd_cid_bind_column = 7
+
+# 日志模块初始化
+device_mnt_logger = logging.Logger('阿里设备脚本方式管理日志')
+device_mnt_handler = logging.FileHandler(r'D:\software\Notepad++\change.log')
+device_mnt_handler.setLevel(logging.DEBUG)
+device_mnt_format = logging.Formatter(
+    '文件：%(filename)s  时间：%(asctime)s  函数：%(funcName)s  级别：%(levelname)s \n 内容：%(message)s')
+device_mnt_handler.setFormatter(device_mnt_format)
+device_mnt_logger.addHandler(device_mnt_handler)
 
 
 # 获取file_path的excel表格中装置的列表
@@ -24,12 +33,13 @@ def extract_colum_cpdid() -> list:
         df = pd.read_excel(xlsx, sheet_name)
         try:
             l_dev_name = df.iloc[:, cpdid_column_id].tolist()
+
         except:
             l_dev_name = []
-            logging.info('导出CPDID列表失败，问题列表为：' + sheet_name)
+            device_mnt_logger.info('导出CPDID列表失败，问题列表为：' + sheet_name)
         l_devices.extend(l_dev_name)
-    logging.info(l_devices)
-    logging.info(len(l_devices))
+    device_mnt_logger.info(f'从文件{file_path}中拿到的所有控制柜装置如下：{l_devices}')
+    device_mnt_logger.info(f'装置的一共有{len(l_devices)}台')
     return l_devices
 
 
@@ -38,16 +48,16 @@ def query_devices_label(l_devices: list[int]) -> dict:
     dict_devices_labels = {}
     for device in l_devices:
         response = query_device_prop(iot_instance_id, product_key, str(device))
-        logging.info('下面是装置的标签信息')
-        logging.info(response)
+        device_mnt_logger.info('下面是装置的标签信息')
+        device_mnt_logger.info(response)
         if response['body']['Success']:
             dev_props = response['body']['Props']
             dict_dev_labels = json.loads(dev_props)
             dict_devices_labels[str(device)] = dict_dev_labels
         else:
-            logging.info(device)
-            logging.info('装置调用接口失败')
-            logging.info(response['body'])
+            device_mnt_logger.info(device)
+            device_mnt_logger.info('装置调用接口失败')
+            device_mnt_logger.info(response['body'])
     return dict_devices_labels
 
 
@@ -56,19 +66,18 @@ def query_devices_status_to_xlsx(l_devices: list):
     wb = openpyxl.load_workbook(file_path)
     # 获取表中第一个sheet对象,用于写入表格
     sheet = wb.active
-
     response_dev_mnt = batch_query_device_detail(product_key, l_devices, iot_instance_id)
-    logging.info(response_dev_mnt)
+    device_mnt_logger.info(response_dev_mnt)
     if response_dev_mnt['body']['Success']:
         # 从返回值中拿到设备详细信息的列表
         l_device_detail = response_dev_mnt['body']['Data']['Data']
-        logging.info(l_device_detail)
+        device_mnt_logger.info(l_device_detail)
         print('表格中装置的状态为：')
         for dict_dev_item in l_device_detail:
             print(dict_dev_item['DeviceName'], dict_dev_item['Status'])
             # 将装置的在线状态更新到表格中
             for row in sheet.iter_rows():
-                if row[cpdid_column_id].value == dict_dev_item['DeviceName']:
+                if str(row[cpdid_column_id].value) == dict_dev_item['DeviceName']:
                     row_num = row[cpdid_column_id].row
                     # 把装置的在线状态写入对应的表格
                     row_later = sheet[row_num]
@@ -123,24 +132,55 @@ def query_license_device(l_device: list) -> dict:
     return dict_lic_device_cid
 
 
+# 通过cpdid查询对应的合同号梯号
+def query_cid_from_cpdid(cpdid: int):
+    sql = f"""
+           select
+               ele_contract_no,
+               vender_terminal_no
+           from
+               md_elevator_v
+           where
+               vender_terminal_no={cpdid}
+       """
+    df = AliyunBizDb().read_data(sql=sql)
+    if len(df) > 0:
+        return df['ele_contract_no'][0]
+    else:
+        return None
+        device_mnt_logger.info(f'在绑定关系表中未找到控制柜装置{cpdid}的绑定记录')
+
+
+# 查询装置列表（cpdid）的绑定关系并打印到filepath中
+def query_bind_relationship_and_write_to_excel(l_devices: list):
+    wb = openpyxl.load_workbook(file_path)
+    # 获取表中第一个sheet对象,用于写入表格
+    sheet = wb.active
+
+    for device in l_devices:
+        query_cid_response = query_cid_from_cpdid(device)
+        for row in sheet.iter_rows():
+            if str(row[cpdid_column_id].value) == str(device):
+                row_num = row[cpdid_column_id].row
+                # 把装置的在线状态写入对应的表格
+                row_later = sheet[row_num]
+                if query_cid_response is not None:
+                    row_later[cpd_cid_bind_column].value = query_cid_response
+                else:
+                    row_later[cpd_cid_bind_column].value = '未绑定'
+        wb.save(file_path)
+
+
 if __name__ == "__main__":
-    # l_devices_from_excel = extract_colum_cpdid()
-    l_devices_from_excel_int = [150203401035,
-150100801346,
-151130103390,
-150203404723,
-150203404670,
-151130102581,
-150203400873,
-140920700227,
-140920700338,
-150100804885]
-    l_devices_from_excel = [str(i) for i in l_devices_from_excel_int]
+    l_devices_from_excel = extract_colum_cpdid()
+    # l_devices_from_excel_int =
+    # l_devices_from_excel = [str(i) for i in l_devices_from_excel_int]
     print('CPD装置总数量：', len(l_devices_from_excel))
-    dict_lic_info = activate_param_crt(l_devices_from_excel)
-    logging.info(dict_lic_info)
+    # # dict_lic_info = activate_param_crt(l_devices_from_excel)
+    # device_mnt_logger.info(dict_lic_info)
     # 调用接口拿到设备的详细信息,里面包含设备的在线状态
-    # query_devices_status_to_xlsx(l_devices_from_excel)
+    query_devices_status_to_xlsx(l_devices_from_excel)
+    query_bind_relationship_and_write_to_excel(l_devices_from_excel)
     # dict_dev_labels = query_devices_label(l_devices_from_excel)
-    # logging.info(dict_dev_labels)
+    # device_mnt_logger.info(dict_dev_labels)
     # print(activate_param_license(l_devices_from_excel)['body'])

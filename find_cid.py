@@ -5,8 +5,8 @@ import openpyxl
 file_path1 = r"D:\my_documents\智慧电梯\无线通话问题排查\季师傅需求\无线通话装置编号查询.xlsx"
 file_path2 = r"D:\my_documents\智慧电梯\无线通话问题排查\季师傅需求\无线通话已绑定.xlsx"
 
-def get_ele_cno(device_name):
 
+def get_ele_cno(device_name):
     sql = f"""
         select
             ele_contract_no,
@@ -40,4 +40,3 @@ if __name__ == "__main__":
                 print(CurrentRow2[1].value, '不是绑定装置')
     wb1.save(file_path1)
     wb2.save(file_path2)
-
