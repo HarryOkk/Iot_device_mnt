@@ -1,18 +1,20 @@
 from remes_aliyun_openapi.iot.thing_model_use import set_devices_property
 from remes_aliyun_openapi.iot.device_manage import batch_query_device_detail
 from remes_aliyun_openapi.iot.device_manage import query_device_prop
+from remes_aliyun_openapi.iot.thing_model_use import query_device_desired_property
 import pandas as pd
 import openpyxl
 import logging
 import json
 from remes_mysql.db_config import AliyunBizDb
 
-file_path = r"D:\my_documents\智慧电梯\花园三期.xlsx"
+file_path = r"C:\Users\10010010\Desktop\离线装置问题排查.xlsx"
 product_key = "g4xdEqa2CfX"
 iot_instance_id = "iot-060a02m5"
-cpdid_column_id = 4
-dev_status_column_id = 6
-cpd_cid_bind_column = 7
+cpdid_column_id = 0
+dev_status_column_id = 1
+cpd_cid_bind_column = 3
+device_thing_version_column = 2
 
 # 日志模块初始化
 device_mnt_logger = logging.Logger('阿里设备脚本方式管理日志')
@@ -171,16 +173,37 @@ def query_bind_relationship_and_write_to_excel(l_devices: list):
         wb.save(file_path)
 
 
+def wirte_desire_thing_version_to_excel(l_devices: list):
+    iot_instance_id = 'iot-060a02m5'
+    product_key = 'g4xdEqa2CfX'
+    identifier = 'WirelessCallFunc'
+    wb = openpyxl.load_workbook(file_path)
+    # 获取表中第一个sheet对象,用于写入表格
+    sheet = wb.active
+    for device_name in l_devices:
+        deivce_thing_version = query_device_desired_property(
+            iot_instance_id=iot_instance_id,
+            product_key=product_key,
+            identifier=identifier,
+            device_name=device_name)
+        dict_writed_desire_thing = {}
+        for row in sheet.iter_rows():
+            if str(row[cpdid_column_id].value) == str(device_name):
+                row_num = row[cpdid_column_id].row
+                # 把装置的在线状态写入对应的表格
+                row_later = sheet[row_num]
+                if deivce_thing_version is not None:
+                    dict_WirelessCallFunc = [d for d in deivce_thing_version['body']['Data']['List']['DesiredPropertyInfo'] if d['Identifier'] == 'WirelessCallFunc'][0]
+                    print(type(dict_WirelessCallFunc),dict_WirelessCallFunc)
+                    dict_writed_desire_thing[dict_WirelessCallFunc['Identifier']] = dict_WirelessCallFunc['Value']
+                    row_later[device_thing_version_column].value = str(dict_writed_desire_thing)
+                else:
+                    row_later[device_thing_version_column].value = '未查到期望值版本'
+        wb.save(file_path)
+
+
 if __name__ == "__main__":
     l_devices_from_excel = extract_colum_cpdid()
-    # l_devices_from_excel_int =
-    # l_devices_from_excel = [str(i) for i in l_devices_from_excel_int]
     print('CPD装置总数量：', len(l_devices_from_excel))
-    # # dict_lic_info = activate_param_crt(l_devices_from_excel)
-    # device_mnt_logger.info(dict_lic_info)
-    # 调用接口拿到设备的详细信息,里面包含设备的在线状态
     query_devices_status_to_xlsx(l_devices_from_excel)
     query_bind_relationship_and_write_to_excel(l_devices_from_excel)
-    # dict_dev_labels = query_devices_label(l_devices_from_excel)
-    # device_mnt_logger.info(dict_dev_labels)
-    # print(activate_param_license(l_devices_from_excel)['body'])
