@@ -14,8 +14,8 @@ from remes_mysql.db_config import AliyunBizDb
 SMEC_GW = 'g4xdEqa2CfX'
 SMEC_CPD = 'g4xdsqZciZ0'
 iot_instance_id = "iot-060a02m5"
-excel_file_info = {'sheet_name': 'Sheet1',
-                   'file_path': r"C:\Users\10010010\Desktop\上海中心.xlsx",
+excel_file_info = {'sheet_name': 'Sheet3',
+                   'file_path': r"C:\Users\10010010\Desktop\第二批筛选装置清单.xlsx",
                    'cpdid_column_id': 0,
                    'dev_status_column_id': 1,
                    'device_thing_version_column': 2,
@@ -31,6 +31,7 @@ excel_file_info = {'sheet_name': 'Sheet1',
                    'mnt_project_address': 12,
                    'mnt_ele_org_name': 13,
                    'mnt_ele_branch_org_name': 14,
+                   'ele_local_name': 15,
                    'mnt_contract_id': 20
                    }
 
@@ -59,6 +60,21 @@ def extract_colum_cpdid() -> list:
     return l_devices
 
 
+# 获取excel_file_info['file_path']的excel表格中电梯的列表
+def extract_colum_cid_eles() -> list:
+    xlsx = pd.ExcelFile(excel_file_info['file_path'])
+    # 该函数导出xlsx文件中的所有sheet
+    df = pd.read_excel(xlsx, excel_file_info['sheet_name'])
+    try:
+        l_eles = df.iloc[:, excel_file_info['LIC_ele_contract_column']].tolist()
+    except:
+        l_eles = []
+        device_mnt_logger.info(f"导出电梯列表失败，问题列表为：{excel_file_info['sheet_name']}")
+    device_mnt_logger.info(f"从文件{excel_file_info['file_path']}中拿到的电梯如下：{l_eles}")
+    device_mnt_logger.info(f'电梯的一共有{len(l_eles)}台')
+    return l_eles
+
+
 # 将表格中的电梯合同号梯号列返回成python列表
 def extract_ele_contract() -> list:
     xlsx = pd.ExcelFile(excel_file_info['file_path'])
@@ -75,29 +91,37 @@ def extract_ele_contract() -> list:
     return l_contract_eles
 
 
-# 查询指定设备的当前属性值
+# 查询指定设备的当前物模型属性值
 def query_devices_thing_status(function_block_id: str,
                                thing_lable_name: str,
-                               device_name: str
+                               l_devices: list[str],
+                               excel_dev_line: int,
+                               excel_thing_module_line: int
                                ) -> dict:
     d_response = {}
-    if function_block_id == 'default':
-        d_func_block = query_device_property_status(iot_instance_id=iot_instance_id,
-                                                    product_key=SMEC_CPD,
-                                                    device_name=device_name)
-    else:
-        d_func_block = query_device_property_status(iot_instance_id=iot_instance_id,
-                                                    product_key=SMEC_CPD,
-                                                    device_name=device_name,
-                                                    function_block_id=function_block_id)
-    l_thing_of_device = d_func_block['body']['Data']['List']['PropertyStatusInfo']
-    for d_single_func_thing in l_thing_of_device:
-        try:
-            if d_single_func_thing['Identifier'] == thing_lable_name:
-                d_response[device_name] = d_single_func_thing['Value']
-        except KeyError:
-            d_response[device_name] = '装置未上传任何值'
-    print(d_response)
+    for device_name in l_devices:
+        if function_block_id == 'default':
+            d_func_block = query_device_property_status(iot_instance_id=iot_instance_id,
+                                                        product_key=SMEC_CPD,
+                                                        device_name=device_name)
+        else:
+            d_func_block = query_device_property_status(iot_instance_id=iot_instance_id,
+                                                        product_key=SMEC_CPD,
+                                                        device_name=device_name,
+                                                        function_block_id=function_block_id)
+        l_thing_of_device = d_func_block['body']['Data']['List']['PropertyStatusInfo']
+        for d_single_func_thing in l_thing_of_device:
+            try:
+                if d_single_func_thing['Identifier'] == thing_lable_name:
+                    d_response[device_name] = d_single_func_thing['Value']
+            except KeyError:
+                d_response[device_name] = None
+    for key, word in d_response.items():
+        write_to_excel_by_match(match_line_of_excel=excel_dev_line,
+                                writen_line_of_excel=excel_thing_module_line,
+                                match_item=key,
+                                writen_item=word
+                                )
     return d_response
 
 
@@ -227,13 +251,17 @@ def query_license_device(l_device: list[str]) -> bool:
 # 通过cpdid查询对应的合同号梯号
 def query_cid_from_cpdid(cpdid: int):
     sql = f"""
-           select
-               ele_contract_no,
-               vender_terminal_no
-           from
-               md_elevator_v
-           where
-               vender_terminal_no={cpdid}
+            select
+                ele_contract_no,
+                cpd_id
+            from
+                t_cpd_elevator 
+            inner join 
+                remes_elevator_base 
+            on
+                t_cpd_elevator.ele_id=remes_elevator_base.ele_id
+            where
+               cpd_id={cpdid}
        """
     df = AliyunBizDb().read_data(sql=sql)
     print(df)
@@ -244,21 +272,66 @@ def query_cid_from_cpdid(cpdid: int):
         device_mnt_logger.info(f'在绑定关系表中未找到控制柜装置{cpdid}的绑定记录')
 
 
-# 查询装置列表（cpdid）的绑定关系并打印到filepath中
-def query_bind_relationship_and_write_to_excel(l_devices: list):
+# 通过cid查询对应二维码绑定关系的CPDID
+def query_cpdid_from_cid(cid: str):
+    sql = f"""
+            select
+                ele_contract_no,
+                cpd_id
+            from
+                t_cpd_elevator 
+            inner join 
+                remes_elevator_base 
+            on
+                t_cpd_elevator.ele_id=remes_elevator_base.ele_id
+            where
+               ele_contract_no='{cid}'
+       """
+    print(sql)
+    df = AliyunBizDb().read_data(sql=sql)
+    print(df)
+    if len(df) > 0:
+        return df['cpd_id'][0]
+    else:
+        return None
+        device_mnt_logger.info(f'在绑定关系表中未找到电梯{cid}的绑定记录')
+
+
+# 查询电梯列表（cid）的绑定关系并打印到filepath中
+def query_bind_relationship_ele_and_write_to_excel(l_cid_eles: list):
     wb = openpyxl.load_workbook(excel_file_info['file_path'])
     # 获取表中第一个sheet对象,用于写入表格
     sheet = wb[excel_file_info['sheet_name']]
 
-    for device in l_devices:
-        query_cid_response = query_cid_from_cpdid(device)
+    for ele in l_cid_eles:
+        query_ele_response = query_cpdid_from_cid(ele)
         for row in sheet.iter_rows():
-            if str(row[excel_file_info['cpdid_column_id']].value) == str(device):
-                row_num = row[excel_file_info['cpdid_column_id']].row
+            if str(row[excel_file_info['LIC_ele_contract_column']].value) == str(ele):
+                row_num = row[excel_file_info['LIC_ele_contract_column']].row
+                row_later = sheet[row_num]
+                if query_ele_response is not None:
+                    row_later[excel_file_info['cpd_cid_bind_column']].value = '二维码已绑定'
+                    row_later[excel_file_info['cpdid_column_id']].value = query_ele_response
+                else:
+                    row_later[excel_file_info['cpd_cid_bind_column']].value = '二维码未绑定'
+        wb.save(excel_file_info['file_path'])
+
+
+# 查询装置列表（cpdid）的绑定关系并打印到filepath中
+def query_bind_relationship_cpdid_and_write_to_excel(l_eles: list):
+    wb = openpyxl.load_workbook(excel_file_info['file_path'])
+    # 获取表中第一个sheet对象,用于写入表格
+    sheet = wb[excel_file_info['sheet_name']]
+
+    for ele in l_eles:
+        query_cid_response = query_cpdid_from_cid(ele)
+        for row in sheet.iter_rows():
+            if str(row[excel_file_info['LIC_ele_contract_column']].value) == str(ele):
+                row_num = row[excel_file_info['LIC_ele_contract_column']].row
                 row_later = sheet[row_num]
                 if query_cid_response is not None:
                     row_later[excel_file_info['cpd_cid_bind_column']].value = '二维码已绑定'
-                    row_later[excel_file_info['LIC_ele_contract_column']].value = query_cid_response
+                    row_later[excel_file_info['cpdid_column_id']].value = query_cid_response
                 else:
                     row_later[excel_file_info['cpd_cid_bind_column']].value = '二维码未绑定'
         wb.save(excel_file_info['file_path'])
@@ -402,15 +475,27 @@ def query_mnt_info_from_cid_to_excel() -> bool:
     l_eles_cid = extract_ele_contract()
     print(l_eles_cid)
     l_mnt_columns = ['customer_name', 'ele_org_name', 'ele_branch_org_name', 'mnt_project_name', 'mnt_project_address',
-                     'mnt_ele_org_name', 'mnt_ele_branch_org_name', 'mnt_contract_id']
+                     'mnt_ele_org_name', 'mnt_ele_branch_org_name', 'mnt_contract_id', 'ele_local_name']
     for ele in l_eles_cid:
         print(ele, type(ele))
         if ele != np.nan:
             sql = f'''
                 select
-                    customer_name,ele_org_name,ele_branch_org_name,mnt_project_name,mnt_project_address,mnt_ele_org_name,mnt_ele_branch_org_name,mnt_contract_id
+                    reb.customer_name,
+                    reb.ele_org_name,
+                    reb.ele_branch_org_name,
+                    reb.mnt_project_name,
+                    reb.mnt_project_address,
+                    reb.mnt_ele_org_name,
+                    reb.mnt_ele_branch_org_name,
+                    reb.mnt_contract_id,
+                    reb2.ele_local_name 
                 from
-                    remes_elevator_base
+                    remes_elevator_base reb
+                left join 
+                    remes_elevator_business reb2 
+                on 
+                    reb.ele_id = reb2.ele_id
                 where
                     ele_contract_no = '{ele}'
                     '''
@@ -430,11 +515,17 @@ def query_mnt_info_from_cid_to_excel() -> bool:
 # 将维保信息按照excel_file_info（）写入到对应的表格中
 def make_cpd_mnt_info_to_excel(l_devices: list[str]) -> bool:
     if l_devices:
+        # 无线转换装置下控制柜装置rgw标签
         write_rgw_lable_to_excel(l_devices)
+        # 查询装置在线状态
         query_devices_status_to_xlsx(l_devices)
-        query_bind_relationship_and_write_to_excel(l_devices)
+        # 查询装置二维码绑定关系
+        query_bind_relationship_cpdid_and_write_to_excel(l_devices)
+        # 查询装置领用人信息
         print('是否完成查询装置领用人：', query_device_receiver_to_excel(l_devices))
+        # 查询装置无线通话绑定的电梯情况
         print('无线通话绑定电梯查询结果为：', query_license_device(l_devices))
+        # 查询装置通过合同号梯号获取的维保信息
         print('合同号梯号维保信息查询的结果为：', query_mnt_info_from_cid_to_excel())
 
     else:
@@ -472,6 +563,14 @@ def query_mnt_contract_id_by_cid() -> bool:
 
 
 if __name__ == "__main__":
+    # l_cid_eles = extract_colum_cid_eles()
+    # query_bind_relationship_cpdid_and_write_to_excel(l_cid_eles)
     l_devices_from_excel = extract_colum_cpdid()
-    # print('维保信息查询结果为', make_cpd_mnt_info_to_excel(l_devices_from_excel))
-    print(query_devices_thing_status(function_block_id='default', thing_lable_name='pCRT', device_name='151026900213'))
+    print('维保信息查询写入结果为：', make_cpd_mnt_info_to_excel(l_devices_from_excel))
+    # print("电梯楼层列表的查询结果为", query_devices_thing_status(
+    #     function_block_id='default',
+    #     thing_lable_name='EleDispFloorTable',
+    #     l_devices=l_devices_from_excel,
+    #     excel_dev_line=0,
+    #     excel_thing_module_line=17
+    # ))
