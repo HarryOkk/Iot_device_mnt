@@ -15,7 +15,7 @@ SMEC_GW = 'g4xdEqa2CfX'
 SMEC_CPD = 'g4xdsqZciZ0'
 iot_instance_id = "iot-060a02m5"
 excel_file_info = {'sheet_name': 'Sheet3',
-                   'file_path': r"C:\Users\10010010\Desktop\第二批筛选装置清单.xlsx",
+                   'file_path': r"C:\Users\10010010\Desktop\上海中心.xlsx",
                    'cpdid_column_id': 0,
                    'dev_status_column_id': 1,
                    'device_thing_version_column': 2,
@@ -158,7 +158,6 @@ def write_rgw_lable_to_excel(l_devices: list[str]):
                                                     writen_line_of_excel=excel_file_info['rgw_lable_column'],
                                                     match_item=device_name_cpd,
                                                     writen_item=rgw)
-            print(f'{device_name_cpd}装置标签写入结果为{writen_result}')
         except KeyError:
             print(f'{device_name_cpd}装置标签写入结果不含有rgw标签')
 
@@ -317,26 +316,6 @@ def query_bind_relationship_ele_and_write_to_excel(l_cid_eles: list):
         wb.save(excel_file_info['file_path'])
 
 
-# 查询装置列表（cpdid）的绑定关系并打印到filepath中
-def query_bind_relationship_cpdid_and_write_to_excel(l_eles: list):
-    wb = openpyxl.load_workbook(excel_file_info['file_path'])
-    # 获取表中第一个sheet对象,用于写入表格
-    sheet = wb[excel_file_info['sheet_name']]
-
-    for ele in l_eles:
-        query_cid_response = query_cpdid_from_cid(ele)
-        for row in sheet.iter_rows():
-            if str(row[excel_file_info['LIC_ele_contract_column']].value) == str(ele):
-                row_num = row[excel_file_info['LIC_ele_contract_column']].row
-                row_later = sheet[row_num]
-                if query_cid_response is not None:
-                    row_later[excel_file_info['cpd_cid_bind_column']].value = '二维码已绑定'
-                    row_later[excel_file_info['cpdid_column_id']].value = query_cid_response
-                else:
-                    row_later[excel_file_info['cpd_cid_bind_column']].value = '二维码未绑定'
-        wb.save(excel_file_info['file_path'])
-
-
 # 查询对应的物模型期望值版本
 def write_desire_thing_version_to_excel(
         l_devices: list,
@@ -388,6 +367,30 @@ def write_to_excel_by_match(match_line_of_excel: int,
             row_later[writen_line_of_excel].value = writen_item
     wb.save(excel_file_info['file_path'])
     return True
+
+
+# 查询装置列表（cpdid）的绑定关系并打印到filepath中
+def query_bind_relationship_cpdid_and_write_to_excel(l_devices: list):
+    d_binds = {}
+    for device in l_devices:
+        sql = f"""
+            select
+                cpd_id,
+                ele_id,
+                status
+            from
+                t_cpd_elevator 
+
+            where
+               cpd_id='{device}'        
+        """
+        df = AliyunBizDb().read_data(sql=sql)
+        if len(df) > 0:
+            write_to_excel_by_match(
+                match_line_of_excel=excel_file_info['cpdid_column_id'],
+                writen_line_of_excel=excel_file_info['cpd_cid_bind_column'],
+                match_item=df['cpd_id'][0],
+                writen_item=df['status'][0])
 
 
 # 查询装置的REMES领用人

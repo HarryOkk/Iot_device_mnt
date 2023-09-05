@@ -1,21 +1,23 @@
 from remes_aliyun_openapi.iot.device_manage import query_device_by_sql, batch_query_device_detail
 from remes_mysql.db_config import AliyunBizDb
+from remes_mysql.db_config import AliyunAnaStatisDb
 
 from iot_device_mnt import query_devices_thing_status, SMEC_CPD, iot_instance_id, SMEC_GW
 import pandas as pd
+import numpy as np
 import time
 import datetime
-from remes_aliyun_openapi.iot.thing_model_use import query_device_property_data, query_device_property_status 
+import schedule
+from remes_aliyun_openapi.iot.thing_model_use import query_device_property_data, query_device_property_status
 
-
-existing_excel_file = r'D:\my_documents\IVRD_DATA_COLLECT\设备通信状态履历.xlsx'
+existing_excel_file = r'\\smecnas3.smec-cn.com\k2data_share\wireless_call_device_signal\设备通信状态履历.xlsx'
 timestamp_seconds = time.time()
 current_timestamp_milliseconds = int(timestamp_seconds * 1000)
 start_timestamp_milliseconds = (current_timestamp_milliseconds - 604800000)
 
 
 def extract_colum_cpdid() -> list:
-    xlsx = pd.ExcelFile(r'D:\my_documents\IVRD_DATA_COLLECT\设备基本信息.xlsx')
+    xlsx = pd.ExcelFile(r'\\smecnas3.smec-cn.com\k2data_share\wireless_call_device_signal\设备基本信息.xlsx')
     # 该函数导出xlsx文件中所有sheet
     df = pd.read_excel(xlsx, 'Sheet2')
     try:
@@ -30,7 +32,7 @@ def extract_colum_cpdid() -> list:
 
 # 导出CPD对应的ELEID字典，前提是文件中已经保存了这样的字典
 def extract_colum_ele_id() -> dict:
-    xlsx = pd.ExcelFile(r'D:\my_documents\IVRD_DATA_COLLECT\设备基本信息.xlsx')
+    xlsx = pd.ExcelFile(r'\\smecnas3.smec-cn.com\k2data_share\wireless_call_device_signal\设备基本信息.xlsx')
     # 该函数导出xlsx文件中所有sheet
     df = pd.read_excel(xlsx, 'Sheet2')
     try:
@@ -57,6 +59,7 @@ def query_devices_thing_status_to_dict(function_block_id: str,
                                                         product_key=SMEC_CPD,
                                                         device_name=device_name,
                                                         function_block_id=function_block_id)
+        print(device_name, d_func_block)
         l_thing_of_device = d_func_block['body']['Data']['List']['PropertyStatusInfo']
         for d_single_func_thing in l_thing_of_device:
             try:
@@ -118,9 +121,10 @@ def trans_milliseconds_to_formattedtime(timestamp_milliseconds: int) -> str:
     return formatted_time
 
 
+# 查询装置IVRD通信状态的履历
 def query_comm_states_resume(device_name: str) -> dict:
     print('当前调用接口的设备名称为：', device_name, type(device_name))
-    if device_name == device_name :
+    if device_name == device_name:
         result = query_device_property_data(
             start_time=start_timestamp_milliseconds,
             identifier='SmartDevMnt:IVRD_CommState',
@@ -158,9 +162,22 @@ def query_CPD_status():
     filtered_df = df[df['DATATYPE'] == 'OPERATION']
     filtered_df.reset_index(drop=False, inplace=True)  # drop=False表示保留原来的第一列作为新的一列
     filtered_df.set_index('index', inplace=True)  # 设置新的索引为原来的第一列，并删除原来的索引列
+#
+#     sql = f'''
+# SELECT
+# *
+# FROM
+# AnaStatisDb.cpd_smart_dev_mnt_ivrd_comm_state;
+# '''
+#     df_ivrd_comm_status = AliyunAnaStatisDb().read_data(sql=sql)
+#     df_ivrd_comm_status['LICFLAG'] = 'IVRD_COMM'
+#     df_ivrd_comm_status['DATATYPE'] = 'IVRD_COMM_STATE'
+#     df_ivrd_comm_status['REASON'] = np.NaN
+#
+#     df_finall = pd.merge(filtered_df, df_ivrd_comm_status,
+#                          on=['DEVICENAME', 'LICFLAG', 'TIMESTAMP', 'DATATYPE', 'VALUE', 'REASON'], how='outer')
     # 打印筛选后的结果
-
-    output_file = r'D:\my_documents\IVRD_DATA_COLLECT\CPD_STATUS.xlsx'
+    output_file = r'\\smecnas3.smec-cn.com\k2data_share\wireless_call_device_signal\CPD_STATUS.xlsx'
     filtered_df.to_excel(output_file, index=False)
 
 
@@ -220,41 +237,61 @@ def query_devices_status(l_devices: list[str]) -> dict:
 # 查询所有含有云care摔倒功能的IVRD设备对应的ele_id：
 def query_all_ivrd_ele_id():
     sql = f'''
-            select
-                distinct zecn.ele_id,
-                tce.cpd_id,
-                tce.created_date ,
-                tce.status,
-                tce.user_id,
-                reb.ele_contract_no ,
-                reb.customer_name,
-                reb.mnt_build_name,
-                zec.ele_local_name 
-            from
-                zhdt_data_db.zhdt_ele_commerce_new zecn
-            left join
-                remes_db.t_cpd_elevator tce 
-            on
-                zecn.ele_id = tce.ele_id 
-            left join 
-                remes_db.remes_elevator_base reb 
-            on 
-                zecn.ele_id = reb.ele_id
-            left join 
-                zhdt_view_db.zv_elevator_config zec 
-            on 
-                zecn.ele_id  = zec.ele_id 
-            where
-                zecn.pot_id=1007
-            and
-                zecn.has_commerce_flag='Y'
+SELECT
+    ele_list.ele_id,
+    tce.cpd_id,
+    tce.created_date,
+    tce.status,
+    tce.user_id,
+    reb.ele_contract_no,
+    reb.customer_name,
+    reb.mnt_build_name,
+    zec.ele_local_name
+FROM
+    (
+        SELECT ele_id
+        FROM (
+            SELECT zecn.ele_id
+            FROM zhdt_data_db.zhdt_ele_commerce_new zecn
+            INNER JOIN zhdt_data_db.zhdt_ele_potential zep ON zecn.ele_id = zep.ele_id AND zecn.pot_id = zep.pot_id
+            WHERE zecn.has_commerce_flag = 'Y' AND zecn.pot_id = 1007
+        ) AS subquery1
+        UNION
+        SELECT ele_id
+        FROM (
+            SELECT ele_id
+            FROM zhdt_data_db.zhdt_cus_purchased_sale_record zcpsr
+            WHERE sale_unit_code = 'care_fall_discern'
+        ) AS subquery2
+    ) ele_list
+LEFT JOIN remes_db.t_cpd_elevator tce ON ele_list.ele_id = tce.ele_id
+LEFT JOIN remes_db.remes_elevator_base reb ON ele_list.ele_id = reb.ele_id
+LEFT JOIN zhdt_view_db.zv_elevator_config zec ON ele_list.ele_id = zec.ele_id;
             '''
     print('sql准备完成，正在查')
-    df_mnt_info = AliyunBizDb().read_data(sql=sql)
-    if len(df_mnt_info) > 0:
-        df_mnt_info.to_excel(r'D:\my_documents\IVRD_DATA_COLLECT\设备基本信息.xlsx', sheet_name='Sheet2', index=False)
+    df_ele_info = AliyunBizDb().read_data(sql=sql)
+    if len(df_ele_info) > 0:
+        df_ele_info.to_excel(r'\\smecnas3.smec-cn.com\k2data_share\wireless_call_device_signal\设备基本信息.xlsx',
+                             sheet_name='Sheet2', index=False)
 
-        cpd_id_list = df_mnt_info['cpd_id'].tolist()
+    # 查询电梯云View详细履历商务标签开通情况
+    sql = f'''
+            select
+                zec.ele_id,
+                zec.has_commerce_flag
+            from
+                zhdt_data_db.zhdt_ele_commerce zec
+            where
+                zec.pot_id=1031
+            '''
+    print('sql准备完成，正在查')
+    df_yun_view_ele_info = AliyunBizDb().read_data(sql=sql)
+    if len(df_yun_view_ele_info) > 0:
+        df_yun_view_ele_info.to_excel(
+            r'\\smecnas3.smec-cn.com\k2data_share\wireless_call_device_signal\云view详细履历商务标签.xlsx',
+            sheet_name='Sheet1', index=False)
+
+        cpd_id_list = df_ele_info['cpd_id'].tolist()
         cpd_id_list = list(filter(lambda x: x is not None, cpd_id_list))
 
         # 查询控制柜装置的软件版本
@@ -269,16 +306,16 @@ def query_all_ivrd_ele_id():
         for key in d_js268_b_version.keys():
             d_js262_version[key] = d_js268_b_version[key]
 
-        js262_version_list = [d_js262_version.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        js262_version_list = [d_js262_version.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['js262_version'] = js262_version_list
+        df_ele_info['js262_version'] = js262_version_list
 
         # 查询装置列表的在线状态，并将在线状态填写到表格对应的位置
         d_cpd_status = query_devices_status(l_devices=cpd_id_list)
         print(d_cpd_status)
-        cpd_status_list = [d_cpd_status.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        cpd_status_list = [d_cpd_status.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 enable_state_list 列表赋值给 df_mnt_info 的新列 'ENABLE_STATE'
-        df_mnt_info['cpd_status'] = cpd_status_list
+        df_ele_info['cpd_status'] = cpd_status_list
 
         # 查询对应的物模型属性
 
@@ -289,9 +326,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_IVRD_EnableState)
-        IVRD_EnableState_list = [d_IVRD_EnableState.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        IVRD_EnableState_list = [d_IVRD_EnableState.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 enable_state_list 列表赋值给 df_mnt_info 的新列 'ENABLE_STATE'
-        df_mnt_info['ENABLE_STATE'] = IVRD_EnableState_list
+        df_ele_info['ENABLE_STATE'] = IVRD_EnableState_list
 
         # 查询IVRD_AppVersion
         d_IVRD_AppVersion = query_devices_thing_status_to_dict(
@@ -300,9 +337,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_IVRD_AppVersion)
-        IVRD_AppVersion_list = [d_IVRD_AppVersion.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        IVRD_AppVersion_list = [d_IVRD_AppVersion.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 IVRD_AppVersion 列表赋值给 df_mnt_info 的新列 'ENABLE_STATE'
-        df_mnt_info['IVRD_AppVersion'] = IVRD_AppVersion_list
+        df_ele_info['IVRD_AppVersion'] = IVRD_AppVersion_list
 
         # 查询IVRD_PSN
         d_IVRD_PSN = query_devices_thing_status_to_dict(
@@ -311,9 +348,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_IVRD_PSN)
-        IVRD_PSN_list = [d_IVRD_PSN.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        IVRD_PSN_list = [d_IVRD_PSN.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 IVRD_PSN 列表赋值给 df_mnt_info 的新列 'ENABLE_STATE'
-        df_mnt_info['IVRD_PSN'] = IVRD_PSN_list
+        df_ele_info['IVRD_PSN'] = IVRD_PSN_list
 
         # 查询IVRD_IP
         d_IVRD_IP = query_devices_thing_status_to_dict(
@@ -322,9 +359,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_IVRD_IP)
-        IVRD_IP_list = [d_IVRD_IP.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        IVRD_IP_list = [d_IVRD_IP.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 IVRD_PSN 列表赋值给 df_mnt_info 的新列 'ENABLE_STATE'
-        df_mnt_info['IVRD_IP'] = IVRD_IP_list
+        df_ele_info['IVRD_IP'] = IVRD_IP_list
 
         # 查询IVRD_CommState
         d_IVRD_CommState = query_devices_thing_status_to_dict(
@@ -333,9 +370,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_IVRD_CommState)
-        IVRD_CommState_list = [d_IVRD_CommState.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        IVRD_CommState_list = [d_IVRD_CommState.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 IVRD_PSN 列表赋值给 df_mnt_info 的新列 'ENABLE_STATE'
-        df_mnt_info['IVRD_CommState'] = IVRD_CommState_list
+        df_ele_info['IVRD_CommState'] = IVRD_CommState_list
 
         # 查询识别功能使能状态：摔倒识别
         d_pPassengerFall = query_devices_thing_status_to_dict(
@@ -344,9 +381,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pPassengerFall)
-        pPassengerFall_list = [d_pPassengerFall.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pPassengerFall_list = [d_pPassengerFall.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['pPassengerFall'] = pPassengerFall_list
+        df_ele_info['pPassengerFall'] = pPassengerFall_list
 
         # 查询识别功能使能状态：乘客扒门
         d_pForceDoorOpen = query_devices_thing_status_to_dict(
@@ -355,9 +392,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pForceDoorOpen)
-        pForceDoorOpen_list = [d_pForceDoorOpen.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pForceDoorOpen_list = [d_pForceDoorOpen.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info[' pForceDoorOpen'] = pForceDoorOpen_list
+        df_ele_info[' pForceDoorOpen'] = pForceDoorOpen_list
 
         # 查询识别功能使能状态：乘客挡门
         d_pPassengerBlockDoor = query_devices_thing_status_to_dict(
@@ -366,9 +403,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pPassengerBlockDoor)
-        pPassengerBlockDoor_list = [d_pPassengerBlockDoor.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pPassengerBlockDoor_list = [d_pPassengerBlockDoor.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['pPassengerBlockDoor'] = pPassengerBlockDoor_list
+        df_ele_info['pPassengerBlockDoor'] = pPassengerBlockDoor_list
 
         # 查询识别功能使能状态：乘客吸烟
         d_pPassengerSmoking = query_devices_thing_status_to_dict(
@@ -377,9 +414,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pPassengerSmoking)
-        pPassengerSmoking_list = [d_pPassengerSmoking.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pPassengerSmoking_list = [d_pPassengerSmoking.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['pPassengerSmoking'] = pPassengerSmoking_list
+        df_ele_info['pPassengerSmoking'] = pPassengerSmoking_list
 
         # 查询识别功能使能状态：宠物乘梯
         d_pPet = query_devices_thing_status_to_dict(
@@ -388,9 +425,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pPet)
-        pPet_list = [d_pPet.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pPet_list = [d_pPet.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['pPet'] = pPet_list
+        df_ele_info['pPet'] = pPet_list
 
         # 查询识别功能使能状态：电动自行车进轿厢
         d_pEbike = query_devices_thing_status_to_dict(
@@ -399,9 +436,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pEbike)
-        pEbike_list = [d_pEbike.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pEbike_list = [d_pEbike.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['pEbike'] = pEbike_list
+        df_ele_info['pEbike'] = pEbike_list
 
         # 查询识别功能使能状态：海康摄像头功能设置
         d_HikvisionCameraFuncSet = query_devices_thing_status_to_dict(
@@ -410,9 +447,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_HikvisionCameraFuncSet)
-        HikvisionCameraFuncSet_list = [d_HikvisionCameraFuncSet.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        HikvisionCameraFuncSet_list = [d_HikvisionCameraFuncSet.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['HikvisionCameraFuncSet'] = HikvisionCameraFuncSet_list
+        df_ele_info['HikvisionCameraFuncSet'] = HikvisionCameraFuncSet_list
 
         # 查询识别功能使能状态：挥手求助
         d_pWaveForHelp = query_devices_thing_status_to_dict(
@@ -421,9 +458,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pWaveForHelp)
-        pWaveForHelp_list = [d_pWaveForHelp.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pWaveForHelp_list = [d_pWaveForHelp.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['pWaveForHelp'] = pWaveForHelp_list
+        df_ele_info['pWaveForHelp'] = pWaveForHelp_list
 
         # 查询识别功能使能状态：轿内遗留物品识别
         d_pObjectLeft = query_devices_thing_status_to_dict(
@@ -432,9 +469,9 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pObjectLeft)
-        pObjectLeft_list = [d_pObjectLeft.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pObjectLeft_list = [d_pObjectLeft.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['pObjectLeft'] = pObjectLeft_list
+        df_ele_info['pObjectLeft'] = pObjectLeft_list
 
         # 查询识别功能使能状态：困人识别
         d_pPassengerTrapped = query_devices_thing_status_to_dict(
@@ -443,16 +480,18 @@ def query_all_ivrd_ele_id():
             l_devices=cpd_id_list,
         )
         print(d_pPassengerTrapped)
-        pPassengerTrapped_list = [d_pPassengerTrapped.get(str(cpd_id)) for cpd_id in df_mnt_info['cpd_id']]
+        pPassengerTrapped_list = [d_pPassengerTrapped.get(str(cpd_id)) for cpd_id in df_ele_info['cpd_id']]
         # 将 pPassengerFall_list 列表赋值给 df_mnt_info 的新列 'pPassengerFall_list'
-        df_mnt_info['pPassengerTrapped'] = pPassengerTrapped_list
+        df_ele_info['pPassengerTrapped'] = pPassengerTrapped_list
 
-        df_mnt_info.to_excel(r'D:\my_documents\IVRD_DATA_COLLECT\设备基本信息.xlsx', sheet_name='Sheet2', index=False)
+        df_ele_info.to_excel(r'\\smecnas3.smec-cn.com\k2data_share\wireless_call_device_signal\设备基本信息.xlsx',
+                             sheet_name='Sheet2', index=False)
     else:
         pass
 
 
-if __name__ == "__main__":
+def daily_service_func():
+    """用于执行每日循环服务的函数"""
     # 遍历到所有配置摔倒功能的电梯（商务合同），并查询这些电梯的一些信息，生成对应的excel
     print('开查')
     query_all_ivrd_ele_id()
@@ -483,3 +522,12 @@ if __name__ == "__main__":
         result_df.to_excel(writer, index=False,
                            header=['datatime', 'commte_state', 'product_key', 'device_name', 'ele_id'],
                            sheet_name='Sheet')
+
+
+if __name__ == "__main__":
+
+    # 每天的特定时间点执行函数
+    schedule.every().day.at("11:00").do(daily_service_func)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
