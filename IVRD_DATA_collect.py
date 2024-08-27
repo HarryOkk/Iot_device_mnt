@@ -485,7 +485,7 @@ LEFT JOIN zhdt_view_db.zv_elevator_config zec ON ele_list.ele_id = zec.ele_id;
         df_ele_info['pPassengerTrapped'] = pPassengerTrapped_list
 
         df_ele_info.to_excel(r'\\smecnas3.smec-cn.com\k2data_share\wireless_call_device_signal\设备基本信息.xlsx',
-                             sheet_name='Sheet2', index=False)
+                             sheet_name='Sheet2', index=False, encoding='utf-8')
     else:
         pass
 
@@ -527,7 +527,8 @@ def daily_service_func():
 if __name__ == "__main__":
 
     # 每天的特定时间点执行函数
-    schedule.every().day.at("11:00").do(daily_service_func)
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    # schedule.every().day.at("11:00").do(daily_service_func)
+    # while True:
+    #     schedule.run_pending()
+    #     time.sleep(1)
+    daily_service_func()

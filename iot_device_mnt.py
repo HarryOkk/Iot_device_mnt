@@ -8,14 +8,13 @@ import numpy as np
 import openpyxl
 import logging
 import json
-import typing
 from remes_mysql.db_config import AliyunBizDb
 
-SMEC_GW = 'g4xdEqa2CfX'
-SMEC_CPD = 'g4xdsqZciZ0'
+SMEC_GW = 'g4xdWK6PWeG'
+SMEC_CPD = 'g4xdLaWW5eq'
 iot_instance_id = "iot-060a02m5"
-excel_file_info = {'sheet_name': 'Sheet3',
-                   'file_path': r"C:\Users\10010010\Desktop\上海中心.xlsx",
+excel_file_info = {'sheet_name': 'Sheet1',
+                   'file_path': r"D:\my_code\iot_dev_mnt\iot_device_mnt.xlsx",
                    'cpdid_column_id': 0,
                    'dev_status_column_id': 1,
                    'device_thing_version_column': 2,
@@ -32,6 +31,7 @@ excel_file_info = {'sheet_name': 'Sheet3',
                    'mnt_ele_org_name': 13,
                    'mnt_ele_branch_org_name': 14,
                    'ele_local_name': 15,
+                   'ele_floor_list': 17,
                    'mnt_contract_id': 20
                    }
 
@@ -96,26 +96,30 @@ def query_devices_thing_status(function_block_id: str,
                                thing_lable_name: str,
                                l_devices: list[str],
                                excel_dev_line: int,
-                               excel_thing_module_line: int
+                               excel_thing_module_line: int,
+                               product_key: str
                                ) -> dict:
     d_response = {}
     for device_name in l_devices:
         if function_block_id == 'default':
             d_func_block = query_device_property_status(iot_instance_id=iot_instance_id,
-                                                        product_key=SMEC_CPD,
+                                                        product_key=product_key,
                                                         device_name=device_name)
         else:
             d_func_block = query_device_property_status(iot_instance_id=iot_instance_id,
-                                                        product_key=SMEC_CPD,
+                                                        product_key=product_key,
                                                         device_name=device_name,
                                                         function_block_id=function_block_id)
-        l_thing_of_device = d_func_block['body']['Data']['List']['PropertyStatusInfo']
-        for d_single_func_thing in l_thing_of_device:
-            try:
-                if d_single_func_thing['Identifier'] == thing_lable_name:
-                    d_response[device_name] = d_single_func_thing['Value']
-            except KeyError:
-                d_response[device_name] = None
+        try:
+            l_thing_of_device = d_func_block['body']['Data']['List']['PropertyStatusInfo']
+            for d_single_func_thing in l_thing_of_device:
+                try:
+                    if d_single_func_thing['Identifier'] == thing_lable_name:
+                        d_response[device_name] = d_single_func_thing['Value']
+                except KeyError:
+                    d_response[device_name] = None
+        except KeyError:
+            print(device_name, 'KeyError happen')
     for key, word in d_response.items():
         write_to_excel_by_match(match_line_of_excel=excel_dev_line,
                                 writen_line_of_excel=excel_thing_module_line,
@@ -223,7 +227,6 @@ def query_license_device(l_device: list[str]) -> bool:
                 cpd_id = {device_name_cpd}
         '''
         df_cpd_ele_id = AliyunBizDb().read_data(sql=sql)
-        print(df_cpd_ele_id, type(df_cpd_ele_id))
         try:
             current_ele_id = df_cpd_ele_id["ele_id"][0]
             sql = f'''
@@ -235,7 +238,6 @@ def query_license_device(l_device: list[str]) -> bool:
                     ele_id = '{current_ele_id}'
             '''
             df_cid_ele_id = AliyunBizDb().read_data(sql=sql)
-            print(df_cid_ele_id, type(df_cid_ele_id))
             dict_lic_device_cid[device_name_cpd] = df_cid_ele_id["ele_contract_no"][0]
             write_to_excel_by_match(match_line_of_excel=excel_file_info['cpdid_column_id'],
                                     writen_line_of_excel=excel_file_info['LIC_ele_contract_column'],
@@ -263,7 +265,6 @@ def query_cid_from_cpdid(cpdid: int):
                cpd_id={cpdid}
        """
     df = AliyunBizDb().read_data(sql=sql)
-    print(df)
     if len(df) > 0:
         return df['ele_contract_no'][0]
     else:
@@ -286,9 +287,7 @@ def query_cpdid_from_cid(cid: str):
             where
                ele_contract_no='{cid}'
        """
-    print(sql)
     df = AliyunBizDb().read_data(sql=sql)
-    print(df)
     if len(df) > 0:
         return df['cpd_id'][0]
     else:
@@ -341,7 +340,6 @@ def write_desire_thing_version_to_excel(
                     dict_WirelessCallFunc = \
                         [d for d in deivce_thing_version['body']['Data']['List']['DesiredPropertyInfo'] if
                          d['Identifier'] == 'WirelessCallFunc'][0]
-                    print(type(dict_WirelessCallFunc), dict_WirelessCallFunc)
                     dict_writed_desire_thing[dict_WirelessCallFunc['Identifier']] = dict_WirelessCallFunc['Value']
                     row_later[excel_file_info['device_thing_version_column']].value = str(dict_writed_desire_thing)
                 else:
@@ -404,7 +402,7 @@ def query_device_receiver_to_excel(l_devices: list[str]) -> bool:
                 from
                     remes_device_base
                 where
-                    vender_terminal_no = {device_name_cpd}
+                    vender_terminal_no = '{device_name_cpd}'
                     '''
             df_device_id = AliyunBizDb().read_data(sql=sql)
             current_device_id = df_device_id["device_id"][0]
@@ -417,7 +415,6 @@ def query_device_receiver_to_excel(l_devices: list[str]) -> bool:
                         device_id = '{current_device_id}'
                 '''
             df_device_receiver_info = AliyunBizDb().read_data(sql=sql)
-            print(df_device_receiver_info)
             write_to_excel_by_match(match_line_of_excel=excel_file_info['cpdid_column_id'],
                                     writen_line_of_excel=excel_file_info['receiver_id'],
                                     match_item=device_name_cpd,
@@ -446,7 +443,6 @@ def query_ele_mnt_info_to_excel(l_devices: list[str]) -> bool:
                 vender_terminal_no = {device_name_cpd}
                 '''
         df_device_id = AliyunBizDb().read_data(sql=sql)
-        print(df_device_id, type(df_device_id))
         try:
             current_device_id = df_device_id["device_id"][0]
             sql = f'''
@@ -458,7 +454,6 @@ def query_ele_mnt_info_to_excel(l_devices: list[str]) -> bool:
                     device_id = '{current_device_id}'
             '''
             df_device_receiver_info = AliyunBizDb().read_data(sql=sql)
-            print(df_device_receiver_info, type(df_device_receiver_info))
             write_to_excel_by_match(match_line_of_excel=excel_file_info['cpdid_column_id'],
                                     writen_line_of_excel=excel_file_info['receiver_id'],
                                     match_item=device_name_cpd,
@@ -480,7 +475,6 @@ def query_mnt_info_from_cid_to_excel() -> bool:
     l_mnt_columns = ['customer_name', 'ele_org_name', 'ele_branch_org_name', 'mnt_project_name', 'mnt_project_address',
                      'mnt_ele_org_name', 'mnt_ele_branch_org_name', 'mnt_contract_id', 'ele_local_name']
     for ele in l_eles_cid:
-        print(ele, type(ele))
         if ele != np.nan:
             sql = f'''
                 select
@@ -515,7 +509,7 @@ def query_mnt_info_from_cid_to_excel() -> bool:
     return True
 
 
-# 将维保信息按照excel_file_info（）写入到对应的表格中
+# 将维保信息按照excel_file_info()写入到对应的表格中
 def make_cpd_mnt_info_to_excel(l_devices: list[str]) -> bool:
     if l_devices:
         # 无线转换装置下控制柜装置rgw标签
@@ -530,7 +524,6 @@ def make_cpd_mnt_info_to_excel(l_devices: list[str]) -> bool:
         print('无线通话绑定电梯查询结果为：', query_license_device(l_devices))
         # 查询装置通过合同号梯号获取的维保信息
         print('合同号梯号维保信息查询的结果为：', query_mnt_info_from_cid_to_excel())
-
     else:
         print(f"表格{excel_file_info['file_path']}不含有装置")
         return False
@@ -543,7 +536,6 @@ def query_mnt_contract_id_by_cid() -> bool:
     print(l_eles_cid)
     mnt_columns = 'mnt_contract_id'
     for ele in l_eles_cid:
-        print(ele, type(ele))
         if ele != np.nan:
             sql = f'''
                        select
@@ -570,10 +562,12 @@ if __name__ == "__main__":
     # query_bind_relationship_cpdid_and_write_to_excel(l_cid_eles)
     l_devices_from_excel = extract_colum_cpdid()
     print('维保信息查询写入结果为：', make_cpd_mnt_info_to_excel(l_devices_from_excel))
-    # print("电梯楼层列表的查询结果为", query_devices_thing_status(
-    #     function_block_id='default',
-    #     thing_lable_name='EleDispFloorTable',
-    #     l_devices=l_devices_from_excel,
-    #     excel_dev_line=0,
-    #     excel_thing_module_line=17
-    # ))
+    """查询物模型属性值"""
+    print("电梯楼层列表的查询结果为", query_devices_thing_status(
+        function_block_id='TPIoTMnt',
+        thing_lable_name='TPIoTMnt:tTdadCommState',
+        l_devices=l_devices_from_excel,
+        excel_dev_line=0,
+        excel_thing_module_line=17,
+        product_key=SMEC_CPD
+    ))

@@ -1,3 +1,4 @@
+import numpy as np
 from remes_aliyun_openapi.iot.device_manage import query_device_by_sql, batch_query_device_detail
 from remes_mysql.db_config import AliyunBizDb
 
@@ -56,7 +57,8 @@ def query_devices_thing_status_to_dict(function_block_id: str,
                 except KeyError:
                     d_response[device_name] = None
         else:
-            print(f'设备{device_name}物模型{function_block_id}模块{thing_lable_name}查询结果为：', d_func_block['body']['Success'], d_func_block['body']['ErrorMessage'])
+            print(f'设备{device_name}物模型{function_block_id}模块{thing_lable_name}查询结果为：',
+                  d_func_block['body']['Success'], d_func_block['body']['ErrorMessage'])
     return d_response
 
 
@@ -88,16 +90,23 @@ def query_device_module_version_by_SQL(device_ota_module: str,
             and
                 name = '{device}' 
             and
-                product_key = '{SMEC_GW}'
+                product_key = '{SMEC_CPD}'
                 """
         d_ota_module_version = query_device_by_sql(sql=sql, iot_instance_id=iot_instance_id)
         # print(d_ota_module_version)
         if d_ota_module_version['body']['Data']:
             l_ota_module_version = d_ota_module_version['body']['Data'][0]['OTAModules']
             for d_FirmwareVersion in l_ota_module_version:
-                if not d_FirmwareVersion['FirmwareVersion'].find('js') or not d_FirmwareVersion['FirmwareVersion'].find(
-                        'JS'):
-                    d_devices_ota_module_version[device] = d_FirmwareVersion['FirmwareVersion']
+                if len(device) == 12:
+                    if not d_FirmwareVersion['FirmwareVersion'].find('js') or not d_FirmwareVersion[
+                        'FirmwareVersion'].find(
+                            'JS'):
+                        d_devices_ota_module_version[device] = d_FirmwareVersion['FirmwareVersion']
+                if len(device) == 8:
+                    if not d_FirmwareVersion['FirmwareVersion'].find('js-v4') or not d_FirmwareVersion[
+                        'FirmwareVersion'].find(
+                            'JS-v4'):
+                        d_devices_ota_module_version[device] = d_FirmwareVersion['FirmwareVersion']
 
         else:
             print(f'{device}设备OTA模块版本查询为空')
@@ -107,13 +116,15 @@ def query_device_module_version_by_SQL(device_ota_module: str,
 
 
 # 查询装置列表的在线状态，并将在线状态填写到表格对应的位置
-def query_devices_status(l_devices: list[str]) ->dict:
+def query_devices_status(l_devices: list[str]) -> dict:
     d_devices_status = {}
     chunk_size = 100  # 分片大小,因该接口每次调用最多查询100台装置，所以需要对list进行分片
+    l_devices = list(filter(lambda x: x is not np.nan, l_devices))
     for i in range(0, len(l_devices), chunk_size):
         chunk = l_devices[i:i + chunk_size]
         # 在这里对每个分片进行处理
-        response_dev_mnt = batch_query_device_detail(SMEC_GW, chunk, iot_instance_id)
+        # todo:分片中存在nan类型
+        response_dev_mnt = batch_query_device_detail(SMEC_CPD, chunk, iot_instance_id)
         if response_dev_mnt['body']['Success']:
             # 从返回值中拿到设备详细信息的列表
             l_device_detail = response_dev_mnt['body']['Data']['Data']
@@ -126,7 +137,7 @@ def query_devices_status(l_devices: list[str]) ->dict:
 
 # 查询142可靠性跟踪的装置
 def query_4G_reliability_tracing():
-    df = pd.read_excel(existing_excel_file1, Sheet)
+    df = pd.read_excel(existing_excel_file1, Sheet, dtype=str)
     if len(df) > 0:
         l_devices = df['Devicename'].tolist()
         l_devices = list(filter(lambda x: x is not None, l_devices))
@@ -134,7 +145,7 @@ def query_4G_reliability_tracing():
         # 查询控制柜装置的软件版本
         d_js262_version = query_device_module_version_by_SQL(device_ota_module='js262_cpu',
                                                              l_devices=l_devices)
-        # 查询表格中简版B装置的软件版本
+        # 查询表格中简版B装置的软件版本d
         l_cpd_js268_b = []
         for k, w in d_js262_version.items():
             if w is None:
@@ -171,7 +182,7 @@ def query_4G_reliability_tracing():
             thing_lable_name='4G_FirewareVersion',
             l_devices=l_devices,
         )
-        FirewareVersion_4G_list = [d_4G_FirewareVersion.get(int(Devicename)) for Devicename in df['Devicename']]
+        FirewareVersion_4G_list = [d_4G_FirewareVersion.get(str(Devicename)) for Devicename in df['Devicename']]
         # 将 4G_FirewareVersion 列表赋值给 df_mnt_info 的新列 '4G_FirewareVersion'
         df['4G_FirewareVersion'] = FirewareVersion_4G_list
 
@@ -181,7 +192,7 @@ def query_4G_reliability_tracing():
             thing_lable_name='4G_HardwareType',
             l_devices=l_devices,
         )
-        l_4G_HardwareType = [d_4G_HardwareType.get(int(Devicename)) for Devicename in df['Devicename']]
+        l_4G_HardwareType = [d_4G_HardwareType.get(str(Devicename)) for Devicename in df['Devicename']]
         # 将 4G_HardwareType 列表赋值给 df_mnt_info 的新列 '4G_HardwareType'
         df['4G_HardwareType'] = l_4G_HardwareType
 
@@ -191,7 +202,7 @@ def query_4G_reliability_tracing():
             thing_lable_name='4G_IMEI',
             l_devices=l_devices,
         )
-        l_4G_IMEI = [d_4G_IMEI.get(int(Devicename)) for Devicename in df['Devicename']]
+        l_4G_IMEI = [d_4G_IMEI.get(str(Devicename)) for Devicename in df['Devicename']]
 
         # 将 4G_IMEI 列表赋值给 df_mnt_info 的新列 '4G_IMEI'
         df['4G_IMEI'] = l_4G_IMEI
